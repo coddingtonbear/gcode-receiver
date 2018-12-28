@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from .receiver import GcodeReceiver
+from .receiver import TerminalGcodeReceiver
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def main(*args, **kwargs):
         level=args.loglevel
     )
 
-    receiver = GcodeReceiver(move_delay=args.move_delay)
+    receiver = TerminalGcodeReceiver(move_delay=args.move_delay)
     try:
         receiver.start()
     except KeyboardInterrupt:

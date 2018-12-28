@@ -20,9 +20,13 @@ class Command(object):
         return True
 
 
+@six.python_2_unicode_compatible
 class GcodeCommand(Command):
     def __init__(self, line):
         self._line = line  # type: binary_type
+
+    def __str__(self):
+        return self._line.decode('ascii', 'replace')
 
     def get_main_field(self):
         # type () -> text_type
@@ -84,6 +88,7 @@ class GcodeCommand(Command):
         return value
 
 
+@six.python_2_unicode_compatible
 class GrblRealtimeCommand(Command):
     STATUS = b'?'  # type: binary_type
     CYCLE_START = b'~'  # type: binary_type
@@ -106,7 +111,7 @@ class GrblRealtimeCommand(Command):
         return self._line
 
     def __str__(self):
-        return self.COMMANDS.get(self.char, hex(self.char))
+        return self.COMMANDS.get(self.char, hex(ord(self.char)))
 
     @classmethod
     def is_realtime_cmd(self, char):

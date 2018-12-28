@@ -5,10 +5,11 @@ from multiprocessing.queues import Empty, Queue
 import os
 import sys
 import tty
-from typing import Any  # noqa: mypy
+from typing import Any, Optional  # noqa: mypy
 
 from six import text_type, binary_type  # noqa: mypy
 
+from .commands import Command  # noqa: mypy
 from .commands import GcodeCommand, GrblRealtimeCommand
 from .responses import StatusResponse
 from .worker import Worker
@@ -37,10 +38,8 @@ class GcodeReceiver(object):
         self.proc.start()
 
     def get_command(self):
-        try:
-            data = sys.stdin.read(1)
-        except IOError:
-            data = None
+        # type: () -> Optional[Command]
+        data = self.get_input()
 
         if GrblRealtimeCommand.is_realtime_cmd(data):
             return GrblRealtimeCommand(data)
@@ -60,26 +59,43 @@ class GcodeReceiver(object):
         return None
 
     def send_output(self, output):
-        # type: (Any) -> None
-        if isinstance(output, StatusResponse):
-            state = u"<{state}|MPos:{x},{y},{z}|FS:{feed},{spindle}>".format(
-                state=output['state'],
-                x=output['x'],
-                y=output['y'],
-                z=output['z'],
-                feed=output['feed_rate'],
-                spindle=output['spindle_speed']
-            )
-            sys.stdout.write((state + '\n').encode('ascii'))
-        elif isinstance(output, text_type):
-            sys.stdout.write((output + '\n').encode('ascii'))
-        else:
-            logger.error(
-                "Unhandled response type: %s",
-                output,
-            )
+        # type: (text_type) -> None
+        raise NotImplementedError()
+
+    def get_input(self):
+        # type: () -> Optional[text_type]
+        raise NotImplementedError()
 
     def start(self):
+        self.send_output(u"FakeGrbl 0.1\n\n")
+
+        while True:
+            command = self.get_command()
+            if command:
+                if command.is_valid():
+                    logger.debug('Sending command to worker: %s', command)
+                    if isinstance(command, GcodeCommand):
+                        self.send_output(u"ok\n")
+                    self._outqueue.put(command)
+                else:
+                    logger.error('Invalid command: %s', command)
+                    self.send_output(u"error\n")
+
+            while not self._inqueue.empty():
+                try:
+                    result = self._inqueue.get_nowait()
+                    logger.debug('Received worker response: %s', result)
+                    self.send_output(text_type(result))
+                except Empty:
+                    pass
+
+    def end(self):
+        self.proc.terminate()
+
+
+class TerminalGcodeReceiver(GcodeReceiver):
+    def __init__(self, **kwargs):
+        super(TerminalGcodeReceiver, self).__init__(**kwargs)
         # Convert terminal to "uncooked" mode
         tty.setcbreak(sys.stdin.fileno())
         # Make input pipe non-blocking
@@ -88,27 +104,13 @@ class GcodeReceiver(object):
             sys.stdin.fileno(), fcntl.F_SETFL, stdin_flags | os.O_NONBLOCK
         )
 
-        self.send_output(u"FakeGrbl 0.1")
+    def send_output(self, output):
+        sys.stdout.write(output.encode('ascii'))
 
-        while True:
-            command = self.get_command()
-            if command:
-                if command.is_valid():
-                    logger.debug('Sending command to worker: %s', command)
-                    if isinstance(command, GcodeCommand):
-                        self.send_output(u"ok")
-                    self._outqueue.put(command)
-                else:
-                    logger.error('Invalid command: %s', command)
-                    self.send_output(u"error")
+    def get_input(self):
+        try:
+            data = sys.stdin.read(1)
+        except IOError:
+            data = None
 
-            while not self._inqueue.empty():
-                try:
-                    result = self._inqueue.get_nowait()
-                    logger.debug('Received worker response: %s', result)
-                    self.send_output(result)
-                except Empty:
-                    pass
-
-    def end(self):
-        self.proc.terminate()
+        return data
