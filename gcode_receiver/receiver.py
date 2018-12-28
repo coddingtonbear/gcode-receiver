@@ -159,3 +159,8 @@ class SocketGcodeReceiver(GcodeReceiver):
                 continue
 
             super(SocketGcodeReceiver, self).start()
+
+    def end(self):
+        super(SocketGcodeReceiver, self).end()
+        self._connection.close()
+        self._socket.close()

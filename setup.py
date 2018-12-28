@@ -7,7 +7,7 @@ with open('requirements.txt') as f:
 
 setup(
     name='gcode-receiver',
-    version='1.0',
+    version='1.0.1',
     description='A very-dumb Gcode receiver for an integration test.',
     url='https://github.com/coddingtonbeear/gcode-receiver',
     author='Adam Coddington',
