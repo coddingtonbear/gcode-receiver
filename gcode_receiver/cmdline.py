@@ -1,8 +1,10 @@
 import argparse
 import logging
-from multiprocessing import Process
 
 from .receiver import GcodeReceiver
+
+
+logger = logging.getLogger(__name__)
 
 
 def getLogLevel(level):
@@ -19,8 +21,14 @@ def main(*args, **kwargs):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--loglevel',
-        default='DEBUG',
+        default='INFO',
         type=getLogLevel
+    )
+    parser.add_argument(
+        '--move-delay',
+        default=1,
+        type=float,
+        help='Amount of time to delay between move commands (s)'
     )
     args = parser.parse_args()
 
@@ -28,5 +36,12 @@ def main(*args, **kwargs):
         level=args.loglevel
     )
 
-    receiver = GcodeReceiver()
-    receiver.run_forever()
+    receiver = GcodeReceiver(move_delay=args.move_delay)
+    try:
+        receiver.start()
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        logger.exception(e)
+    finally:
+        receiver.end()

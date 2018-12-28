@@ -5,3 +5,6 @@ lib/*
 *.log
 *.swp
 *.pyc
+.mypy_cache/*
+.vscode/*
+local/*
