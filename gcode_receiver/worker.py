@@ -1,11 +1,10 @@
+import collections
 import logging
 from multiprocessing.queues import Empty as MultiprocessingQueueEmpty
 import time
 
-from six.moves.queue import Empty, Queue
-
 from .commands import GcodeCommand, GrblRealtimeCommand
-from .responses import StatusResponse
+from .responses import CommandAccepted, StatusResponse
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,8 @@ class EmptyCommandQueue(WorkerException):
 
 
 class Worker(object):
+    MAX_COMMANDS = 100
+
     def __init__(self, inqueue, outqueue, move_delay=0, **kwargs):
         # These queues are for communication only
         self._inqueue = inqueue
@@ -35,7 +36,7 @@ class Worker(object):
         self.initialize()
 
     def initialize(self):
-        self._commands = Queue()
+        self._commands = collections.deque()
         self._command = None
         self._command_meta = {}
 
@@ -57,18 +58,21 @@ class Worker(object):
         self.start()
 
     def next_command(self):
-        if self._commands.empty():
+        if not len(self._commands):
             return False
 
         try:
-            self._command = self._commands.get_nowait()
             logger.debug(
+                'Current command queue: %s',
+                self._commands
+            )
+            self._command = self._commands.popleft()
+            logger.info(
                 'Worker beginning processing of command: %s',
                 self._command
             )
             return True
-        except Empty:
-            self._command = None
+        except IndexError:
             return False
 
     def command_finished(self):
@@ -96,7 +100,7 @@ class Worker(object):
 
     def handle_gcode_F(self):
         """Set feed rate"""
-        self._feed_rate = self.command.as_dict()['F']
+        self._feed_rate = self.command.get_main_value()
 
     def handle_gcode_G0(self):
         """Rapid move"""
@@ -105,7 +109,7 @@ class Worker(object):
         if time.time() < self.command_meta['delay_until']:
             raise Incomplete()
 
-        data = self.command.as_dict()
+        data = self.command.get_args_dict()
         self._x = data.get('X', self._x)
         self._y = data.get('Y', self._y)
         self._z = data.get('Z', self._z)
@@ -117,7 +121,7 @@ class Worker(object):
         if time.time() < self.command_meta['delay_until']:
             raise Incomplete()
 
-        data = self.command.as_dict()
+        data = self.command.get_args_dict()
         self._x = data.get('X', self._x)
         self._y = data.get('Y', self._y)
         self._z = data.get('Z', self._z)
@@ -137,10 +141,16 @@ class Worker(object):
     def handle_gcode_G90(self):
         """Absolute positioning"""
         self._absolute = True
+        self.reenqueue_extra_args_as_command(
+            self.command.get_parsed()[1:]
+        )
 
     def handle_gcode_G91(self):
         """Relative positioning"""
         self._absolute = False
+        self.reenqueue_extra_args_as_command(
+            self.command.get_parsed()[1:]
+        )
 
     def handle_gcode_G94(self):
         """Feed rate mode: Units/min"""
@@ -155,7 +165,7 @@ class Worker(object):
         self._spindle_on = True
         self._spindle_clockwise = True
 
-        data = self.command.as_dict()
+        data = self.command.get_args_dict()
         self._spindle_speed = data.get('S', self._spindle_speed)
 
     def handle_gcode_M4(self):
@@ -163,7 +173,7 @@ class Worker(object):
         self._spindle_on = True
         self._spindle_clockwise = False
 
-        data = self.command.as_dict()
+        data = self.command.get_args_dict()
         self._spindle_speed = data.get('S', self._spindle_speed)
 
     def handle_gcode_M5(self):
@@ -172,7 +182,7 @@ class Worker(object):
 
     def tick(self):
         if not self.command:
-            time.sleep(0.1)
+            time.sleep(0.01)
             raise EmptyCommandQueue()
 
         handler_name_options = [
@@ -212,13 +222,29 @@ class Worker(object):
                 str(cmd)
             )
 
+    def reenqueue_extra_args_as_command(self, params):
+        if not params:
+            return
+
+        extra = u''
+        for param in params:
+            extra += param['cmd']
+
+        cmd = GcodeCommand(extra.encode('ascii', 'replace'))
+        logger.debug(
+            'Inserting new command to head of queue: %s', cmd
+        )
+        logger.debug(params)
+
+        self._commands.appendleft(cmd)
+
     def enqueue_gcode(self, cmd):
-        self._commands.put(cmd)
+        self._commands.append(cmd)
 
     def emit_response(self, response):
         logger.debug(
             'Enqueueing worker response: %s',
-            response,
+            str(response).strip(),
         )
         self._outqueue.put(response)
 
@@ -233,10 +259,15 @@ class Worker(object):
             else:
                 self.command_finished()
 
-            while not self._inqueue.empty():
+            if not self._inqueue.empty():
+                if len(self._commands) > self.MAX_COMMANDS - 1:
+                    time.sleep(0.01)
+                    continue
+
                 try:
                     cmd = self._inqueue.get_nowait()
                 except MultiprocessingQueueEmpty:
+                    time.sleep(0.01)
                     continue
 
                 logger.debug('Worker received command: %s', cmd)
@@ -248,3 +279,4 @@ class Worker(object):
                         self.emit_response(response)
                 elif isinstance(cmd, GcodeCommand):
                     self.enqueue_gcode(cmd)
+                    self.emit_response(CommandAccepted())

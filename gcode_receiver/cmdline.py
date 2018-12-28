@@ -34,7 +34,7 @@ def main(*args, **kwargs):
     )
     parser.add_argument(
         '--move-delay',
-        default=1,
+        default=0.01,
         type=float,
         help='Amount of time to delay between move commands (s)'
     )

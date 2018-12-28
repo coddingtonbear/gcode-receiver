@@ -77,8 +77,6 @@ class GcodeReceiver(object):
             if command:
                 if command.is_valid():
                     logger.debug('Sending command to worker: %s', command)
-                    if isinstance(command, GcodeCommand):
-                        self.send_output(u"ok\n")
                     self._outqueue.put(command)
                 else:
                     logger.error('Invalid command: %s', command)
@@ -87,7 +85,10 @@ class GcodeReceiver(object):
             while not self._inqueue.empty():
                 try:
                     result = self._inqueue.get_nowait()
-                    logger.debug('Received worker response: %s', result)
+                    logger.debug(
+                        'Received worker response: %s',
+                        str(result).strip()
+                    )
                     self.send_output(text_type(result))
                 except Empty:
                     pass
@@ -100,11 +101,9 @@ class TerminalGcodeReceiver(GcodeReceiver):
     def get_input(self):
         # type: () -> Optional[binary_type]
         try:
-            data = sys.stdin.read(1)
+            return sys.stdin.read(1)
         except IOError:
-            data = None
-
-        return data
+            return None
 
     def send_output(self, output):
         # type: (text_type) -> None
@@ -133,11 +132,9 @@ class SocketGcodeReceiver(GcodeReceiver):
     def get_input(self):
         # type: () -> Optional[binary_type]
         try:
-            data = self._connection.recv(1)
+            return self._connection.recv(1)
         except socket.error:
-            data = None
-
-        return data
+            return None
 
     def send_output(self, output):
         # type: (text_type) -> None
@@ -146,7 +143,7 @@ class SocketGcodeReceiver(GcodeReceiver):
     def start(self):
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.bind(('localhost', self._port))
-        self._socket.listen(5)  # Max connections
+        self._socket.listen(10)  # Max connections
         self._socket.setblocking(0)
 
         logger.info('Listening on port %s', self._port)

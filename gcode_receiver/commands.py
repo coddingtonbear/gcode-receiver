@@ -1,3 +1,4 @@
+import collections
 import re
 from typing import Any, Dict, List, Iterator  # noqa: mypy
 
@@ -33,6 +34,12 @@ class GcodeCommand(Command):
         parsed = self.get_parsed()
 
         return parsed[0]['field'].upper()
+
+    def get_main_value(self):
+        # type () -> float
+        parsed = self.get_parsed()
+
+        return parsed[0]['value']
 
     def get_name(self):
         # type () -> text_type
@@ -79,10 +86,10 @@ class GcodeCommand(Command):
             } for field in fields
         ]
 
-    def as_dict(self):
-        value = {}
+    def get_args_dict(self):
+        value = collections.OrderedDict()
 
-        for frame in self.get_parsed():
+        for frame in self.get_parsed()[1:]:
             value[frame['field']] = frame['value']
 
         return value

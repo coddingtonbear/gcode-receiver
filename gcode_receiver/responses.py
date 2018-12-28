@@ -12,6 +12,12 @@ class Response(dict):
 
 
 @six.python_2_unicode_compatible
+class CommandAccepted(Response):
+    def __str__(self):
+        return u'ok\n'
+
+
+@six.python_2_unicode_compatible
 class StatusResponse(Response):
     RUN = 'Run'
     IDLE = 'Idle'
