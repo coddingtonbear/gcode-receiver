@@ -172,6 +172,7 @@ class Worker(object):
 
     def tick(self):
         if not self.command:
+            time.sleep(0.1)
             raise EmptyCommandQueue()
 
         handler_name_options = [

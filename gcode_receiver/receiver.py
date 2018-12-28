@@ -3,7 +3,9 @@ import fcntl
 from multiprocessing import Process
 from multiprocessing.queues import Empty, Queue
 import os
+import socket
 import sys
+import time
 import tty
 from typing import Any, Optional  # noqa: mypy
 
@@ -11,7 +13,6 @@ from six import text_type, binary_type  # noqa: mypy
 
 from .commands import Command  # noqa: mypy
 from .commands import GcodeCommand, GrblRealtimeCommand
-from .responses import StatusResponse
 from .worker import Worker
 
 
@@ -25,7 +26,7 @@ class GcodeReceiver(object):
         self._inqueue = Queue()
         self._outqueue = Queue()
 
-        self._current_line = ""
+        self._current_line = b""
 
         self.proc = Process(
             target=Worker.create,
@@ -47,23 +48,25 @@ class GcodeReceiver(object):
         if data is not None:
             self._current_line += data
 
-        if '\n' in self._current_line:
+        if b'\n' in self._current_line:
             if not self._current_line.strip():
-                self._current_line = ""
+                self._current_line = b""
                 return None
 
-            result = GcodeCommand(self._current_line.strip())
-            self._current_line = ""
+            result = GcodeCommand(
+                self._current_line.strip()
+            )
+            self._current_line = b""
             return result
 
         return None
 
-    def send_output(self, output):
-        # type: (text_type) -> None
+    def get_input(self):
+        # type: () -> Optional[binary_type]
         raise NotImplementedError()
 
-    def get_input(self):
-        # type: () -> Optional[text_type]
+    def send_output(self, output):
+        # type: (text_type) -> None
         raise NotImplementedError()
 
     def start(self):
@@ -94,8 +97,20 @@ class GcodeReceiver(object):
 
 
 class TerminalGcodeReceiver(GcodeReceiver):
-    def __init__(self, **kwargs):
-        super(TerminalGcodeReceiver, self).__init__(**kwargs)
+    def get_input(self):
+        # type: () -> Optional[binary_type]
+        try:
+            data = sys.stdin.read(1)
+        except IOError:
+            data = None
+
+        return data
+
+    def send_output(self, output):
+        # type: (text_type) -> None
+        sys.stdout.write(output.encode('ascii'))
+
+    def start(self):
         # Convert terminal to "uncooked" mode
         tty.setcbreak(sys.stdin.fileno())
         # Make input pipe non-blocking
@@ -103,14 +118,47 @@ class TerminalGcodeReceiver(GcodeReceiver):
         fcntl.fcntl(
             sys.stdin.fileno(), fcntl.F_SETFL, stdin_flags | os.O_NONBLOCK
         )
+        super(TerminalGcodeReceiver, self).start()
 
-    def send_output(self, output):
-        sys.stdout.write(output.encode('ascii'))
+
+class SocketGcodeReceiver(GcodeReceiver):
+    def __init__(self, port=8300, **kwargs):
+        super(SocketGcodeReceiver, self).__init__(**kwargs)
+        self._port = port
+
+        # Will be set when connection is accepted in .start
+        self._connection = None
+        self._address = None
 
     def get_input(self):
+        # type: () -> Optional[binary_type]
         try:
-            data = sys.stdin.read(1)
-        except IOError:
+            data = self._connection.recv(1)
+        except socket.error:
             data = None
 
         return data
+
+    def send_output(self, output):
+        # type: (text_type) -> None
+        self._connection.sendall(output.encode('ascii'))
+
+    def start(self):
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.bind(('localhost', self._port))
+        self._socket.listen(5)  # Max connections
+        self._socket.setblocking(0)
+
+        logger.info('Listening on port %s', self._port)
+
+        while True:
+            try:
+                self._connection, self._address = self._socket.accept()
+                logger.info(
+                    'Accepted connection from %s', self._address
+                )
+            except socket.error:
+                time.sleep(0.1)
+                continue
+
+            super(SocketGcodeReceiver, self).start()

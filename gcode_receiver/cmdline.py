@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from .receiver import TerminalGcodeReceiver
+from .receiver import SocketGcodeReceiver, TerminalGcodeReceiver
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,14 @@ def main(*args, **kwargs):
         type=getLogLevel
     )
     parser.add_argument(
+        '--socket',
+        type=int,
+        help=(
+            'Start a socket server on the specified port '
+            'instead of invoking the command-line receiver.'
+        )
+    )
+    parser.add_argument(
         '--move-delay',
         default=1,
         type=float,
@@ -36,7 +44,15 @@ def main(*args, **kwargs):
         level=args.loglevel
     )
 
-    receiver = TerminalGcodeReceiver(move_delay=args.move_delay)
+    cls = TerminalGcodeReceiver
+    kwargs = {
+        'move_delay': args.move_delay,
+    }
+    if args.socket:
+        cls = SocketGcodeReceiver
+        kwargs['port'] = args.socket
+
+    receiver = cls(**kwargs)
     try:
         receiver.start()
     except KeyboardInterrupt:
