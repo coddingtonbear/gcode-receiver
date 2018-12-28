@@ -1,14 +1,13 @@
 import re
 from typing import Any, Dict, List, Iterator  # noqa: mypy
 
+import six
 from six import text_type, binary_type  # noqa: mypy
 
 
+@six.python_2_unicode_compatible
 class Command(object):
     def __str__(self):
-        return self._line
-
-    def __unicode__(self):
         return self._line.decode('ascii', 'replace')
 
     def __repr__(self):
@@ -107,7 +106,7 @@ class GrblRealtimeCommand(Command):
         return self._line
 
     def __str__(self):
-        return self.COMMANDS[self.char]
+        return self.COMMANDS.get(self.char, hex(self.char))
 
     @classmethod
     def is_realtime_cmd(self, char):
